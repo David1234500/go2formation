@@ -1,5 +1,5 @@
 
-#include "lane_graph.hpp"                       //sw-folder central routing->include
+
 #include "cpm/Logging.hpp"                      //->cpm_lib->include->cpm
 #include "cpm/CommandLineReader.hpp"            //->cpm_lib->include->cpm
 #include "cpm/init.hpp"                         //->cpm_lib->include->cpm
@@ -9,8 +9,7 @@
 #include "VehicleCommandTrajectoryPubSubTypes.h"
 #include "cpm/Participant.hpp"
 #include "cpm/HLCCommunicator.hpp"
-#include "VehicleTrajectoryPlanningState.hpp"   //sw-folder central routing
-#include "lane_graph_tools.hpp"                 //sw-folder central routing
+
 #include <iostream>
 #include <sstream>
 #include <memory>
@@ -18,7 +17,10 @@
 #include <thread>
 #include <set>
 #include <stdexcept>
-#include "MultiVehicleTrajectoryPlanner.hpp"    //sw-folder central routing
+
+#include <planner/SimplePlanner.hpp>
+
+
 
 using std::vector;
 
@@ -88,9 +90,23 @@ int main(int argc, char *argv[])
             hlc_communicator.getLocalParticipant()->get_participant(), 
             "vehicleCommandTrajectory");
 
+    plan::SimpleRoutePlanner planner;
+
+    uint64_t t_start_ns = 0;
+           
     /////////////////////////////////Trajectory planner//////////////////////////////////////////
     hlc_communicator.onFirstTimestep([&](VehicleStateList vehicle_state_list) {
-            
+        
+        t_start_ns = vehicle_state_list.t_now();
+        uint64_t t_now_s = t_start_ns / 1000000000;
+        
+        cpm::Logging::Instance().write(
+                    1,
+                    "[G2F] Callback onFirst Timestep at %ull", t_now_s
+                );
+
+           
+
             for(auto vehicle_state:vehicle_state_list.state_list())
             {
             
@@ -98,13 +114,48 @@ int main(int argc, char *argv[])
                     1,
                     "[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw()
                 );
+                dynamics::VehicleState state;
+                state.pose.pos = {vehicle_state.pose().x(),vehicle_state.pose().y()};
+                state.pose.h = vehicle_state.pose().yaw();
+                state.pose.vel = 0;
+                state.pose.time = 0;
+                planner.vehicle_initial_states[vehicle_state.vehicle_id] = state;
+            }
+    });
+
+    planner.plan2();
+
+    
+
+    cpm::Logging::Instance().write(
+                    1,
+                    "[G2F] Successfully computed routes"
+                    );
+
+    hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
+
+            uint64_t t_now_ns = vehicle_state_list.t_now();
+            uint64_t t_now_s = t_now_ns / 1000000000;
+
+            cpm::Logging::Instance().write(
+                    1,
+                    "[G2F] Callback on Each Timestep at %ull", t_now_s
+                    );
+         
+
+            for(auto vehicle_state:vehicle_state_list.state_list())
+            {
+            
+                cpm::Logging::Instance().write(
+                    1,
+                    "[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw()
+                );
+               
 
 
             }
-    });
-    hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
-            // Do not start if middleware period is not 400ms
-         
+
+
     });
 
     hlc_communicator.start();
