@@ -18,7 +18,7 @@
 #include <set>
 #include <stdexcept>
 
-#include <planner/SimplePlanner.hpp>
+#include <Planner/SimplePlanner.hpp>
 
 
 
@@ -118,23 +118,24 @@ int main(int argc, char *argv[])
                 state.pose.pos = {vehicle_state.pose().x(),vehicle_state.pose().y()};
                 state.pose.h = vehicle_state.pose().yaw();
                 state.pose.vel = 0;
-                state.pose.time = 0;
-                planner.vehicle_initial_states[vehicle_state.vehicle_id] = state;
+                state.pose.time_ms = 0;
+                planner.vehicle_initial_states[vehicle_state.vehicle_id()] = state;
             }
     });
 
     planner.plan2();
 
-    
+    auto plan = planner.get_results_as_pose_list();
 
     cpm::Logging::Instance().write(
                     1,
-                    "[G2F] Successfully computed routes"
+                    "[G2F] Successfully computed routes for all vehicles..."
                     );
 
     hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
 
             uint64_t t_now_ns = vehicle_state_list.t_now();
+            uint64_t t_now_ms = t_now_ns / 1000000;
             uint64_t t_now_s = t_now_ns / 1000000000;
 
             cpm::Logging::Instance().write(
@@ -150,8 +151,40 @@ int main(int argc, char *argv[])
                     1,
                     "[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw()
                 );
-               
 
+                bool found_start = false;
+                vector<TrajectoryPoint> trajectory_points;
+                for(auto pose: plan[vehicle_state.vehicle_id()]){
+                    
+                    if(pose.time_ms - t_now_ms < 100){ //look for the first pose within 100ms, then begin to build the trajectory
+                        found_start = true;
+                    }
+                   
+                    TrajectoryPoint trajectory_point;
+                    trajectory_point.px(pose.pos[0]);
+                    trajectory_point.py(pose.pos[1]);
+
+                        
+                    dynamics::data::Vector2Df v_vel = {pose.vel, 0.f};
+                    Eigen::Rotation2Df m_rot_h(pose.h);
+                    auto v_h = m_rot_h * v_vel;
+
+                    trajectory_point.vx(v_h[0]);
+                    trajectory_point.vy(v_h[1]);
+                    
+                    trajectory_point.t().nanoseconds(pose.time_ms * 1000000); 
+
+                    trajectory_points.push_back(trajectory_point);
+
+                }
+
+                // Send the current trajectory 
+                VehicleCommandTrajectory vehicle_command_trajectory;
+                vehicle_command_trajectory.vehicle_id(vehicle_state.vehicle_id());
+                vehicle_command_trajectory.trajectory_points(trajectory_points);
+                vehicle_command_trajectory.header().create_stamp().nanoseconds(t_now_ns);
+                vehicle_command_trajectory.header().valid_after_stamp().nanoseconds(t_now_ns + 1000000000ull);
+                writer_vehicleCommandTrajectory.write(vehicle_command_trajectory);
 
             }
 

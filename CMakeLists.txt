@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.1)
 add_definitions(-Wall -Wextra -Werror=return-type)
 set (CMAKE_CXX_STANDARD 17)
 
-
+include_directories(SimpleHLC/thirdparty/eigen)
 include_directories(SimpleHLC/include)
 add_subdirectory(SimpleHLC)
 
@@ -34,6 +34,6 @@ link_libraries(dl nsl m pthread rt)
 add_executable(main
     src/main.cpp
 )
-target_link_libraries(main cpm fastrtps fastcdr foonathan_memory)
+target_link_libraries(main planner_lib cpm fastrtps fastcdr foonathan_memory)
 
 
