@@ -18,7 +18,7 @@
 #include <set>
 #include <stdexcept>
 
-#include <Planner/SimplePlanner.hpp>
+#include <Planner/CBSPlanner.hpp>
 
 
 
@@ -55,7 +55,7 @@ using std::vector;
  * \ingroup central_routing
  */
 
-bool compare_pose_time(dynamics::data::Pose2DD d1, dynamics::data::Pose2DD d2)
+bool compare_pose_time(dynamics::data::Pose2WithTime d1, dynamics::data::Pose2WithTime d2)
 {
     return (d1.time_ms < d2.time_ms);
 }
@@ -96,7 +96,9 @@ int main(int argc, char *argv[])
             hlc_communicator.getLocalParticipant()->get_participant(), 
             "vehicleCommandTrajectory");
 
-    plan::SimpleRoutePlanner planner;
+    CBSPlanner planner;
+    planner.m_proxGraph.loadGraphFromDisk("");
+    constraint_node result;
 
     cpm::Logging::Instance().write(
                     1,
@@ -116,6 +118,8 @@ int main(int argc, char *argv[])
 
            
             uint32_t index = 0;
+            std::vector<dynamics::data::PoseByIndex> start_positions;
+            std::vector<dynamics::data::PoseByIndex> target_positions;
             for(auto vehicle_state:vehicle_state_list.state_list())
             {
             
@@ -123,30 +127,32 @@ int main(int argc, char *argv[])
                     1,
                     "[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw()
                 );
-                dynamics::VehicleState state;
-                state.pose.pos = {vehicle_state.pose().x() * 100,vehicle_state.pose().y() * 100};
-                state.pose.h = vehicle_state.pose().yaw();
-                state.pose.vel = 0;
-                state.pose.time_ms = 0;
+                
+               
 
-                state.target.pos = {0.f + index * 60.f,0.f};
-                state.target.vel = 0;
-                state.target.h = 0;
+                dynamics::data::Pose2D start;
+                start.pos = {vehicle_state.pose().x() * 100,vehicle_state.pose().y() * 100};
+                start.h = vehicle_state.pose().yaw();
+                start.vel = 0;
 
-                planner.vehicle_initial_states[index] = state;
+                dynamics::data::Pose2D target;
+                target.pos = {0.f + index * 60.f,0.f};
+                target.vel = 0;
+                target.h = 0;
+
+                start_positions.push_back(CBSPlanner::findNearestPoseByIndex(start));
+                target_positions.push_back(CBSPlanner::findNearestPoseByIndex(target));
                 index ++;
             }
 
-            auto config = util::Config::getInstance();
-            config->key2Integer_map["vehicle_count"] = index;
-
+            
             cpm::Logging::Instance().write(
                     1,
                     "[G2F] Planner plan"
                     );
 
-            planner.plan2();
-
+            
+            result = planner.cbs(start_positions, target_positions);
 
 
              cpm::Logging::Instance().write(
@@ -172,15 +178,10 @@ int main(int argc, char *argv[])
             uint64_t t_now_ns = vehicle_state_list.t_now();
             uint64_t t_now_ms = t_now_ns / 1000000;
             
-            auto config = util::Config::getInstance();
-            uint32_t timestep_ms =  config->getIntegerByKey("timestep");
-
             if(!initialized){
                 initialized = true;
                 t_ref_start_ms = t_now_ms;
             }
-
-            auto plan = planner.get_results_as_pose_list();
 
             cpm::Logging::Instance().write(
                     1,
@@ -195,11 +196,13 @@ int main(int argc, char *argv[])
                     "[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw()
                 );
 
+                auto plan_for_vehicle = result.result[index].spline;
+
                 bool found_start = false;
                 vector<TrajectoryPoint> trajectory_points;
-                sort(plan[index].begin(),plan[index].end(),compare_pose_time);
+                sort(plan_for_vehicle.begin(),plan_for_vehicle.end(),compare_pose_time);
                 
-                for(auto pose: plan[index]){ 
+                for(auto pose: plan_for_vehicle){ 
 
                         TrajectoryPoint trajectory_point;
                         trajectory_point.px(pose.pos[0] / 100);
@@ -208,12 +211,6 @@ int main(int argc, char *argv[])
                         dynamics::data::Vector2Df v_vel = {(-pose.vel / 100.f), 0.f}; //cm/s -> m/s
                         Eigen::Rotation2Df m_rot_h(pose.h );
                         auto v_h = m_rot_h * v_vel;
-
-                        // trajectory_point.vx(v_h[0]);
-                        // trajectory_point.vy(v_h[1]);
-
-                        // trajectory_point.vx(((-pose.vel / 100.f) * static_cast<float>(timestep_ms)/1000.f) * cos(pose.h));
-                        // trajectory_point.vy(((-pose.vel / 100.f) * static_cast<float>(timestep_ms)/1000.f) * sin(pose.h));
 
                         cpm::Logging::Instance().write(
                         3,

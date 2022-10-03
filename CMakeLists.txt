@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 3.1)
 add_definitions(-Wall -Wextra -Werror=return-type)
 set (CMAKE_CXX_STANDARD 17)
 
-include_directories(SimpleHLC/thirdparty/eigen)
-include_directories(SimpleHLC/include)
-add_subdirectory(SimpleHLC)
+# include_directories(SimpleHLC/thirdparty/eigen)
+# include_directories(SimpleHLC/include)
+# add_subdirectory(SimpleHLC)
+
+include_directories(NH-ICBS-HLC/thirdparty/eigen)
+include_directories(NH-ICBS-HLC/include)
+add_subdirectory(NH-ICBS-HLC)
 
 # Fast DDS / eProsima
 if(NOT fastcdr_FOUND)
