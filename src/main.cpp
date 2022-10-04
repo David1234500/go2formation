@@ -210,11 +210,18 @@ int main(int argc, char *argv[])
                 vector<TrajectoryPoint> trajectory_points;
                 sort(plan_for_vehicle.begin(),plan_for_vehicle.end(),compare_pose_time);
                 
-                // TrajectoryPoint trajectory_point;
-                // trajectory_point.px(vehicle_state.pose().x());
-                // trajectory_point.py(vehicle_state.pose().y());
+                TrajectoryPoint trajectory_point;
+                trajectory_point.px(vehicle_state.pose().x());
+                trajectory_point.py(vehicle_state.pose().y());
 
-                // trajectory_point.t().nanoseconds((-250 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                dynamics::data::Vector2Df v_vel = {(vehicle_state.pose().yaw() / 100.f), 0.f}; //cm/s -> m/s
+                Eigen::Rotation2Df m_rot_h(pose.h );
+                auto v_h = m_rot_h * v_vel;
+                        
+                trajectory_point.vx(v_h[0]);
+                trajectory_point.vy(v_h[1]);
+
+                trajectory_point.t().nanoseconds((-500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
                 
                 for(auto pose: plan_for_vehicle){ 
 
