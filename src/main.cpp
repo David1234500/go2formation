@@ -177,10 +177,12 @@ int main(int argc, char *argv[])
                     );
 
     bool initialized = false;
+    bool initialized_start_pose = false;
     uint64_t t_ref_start_ms = 0;
-    uint64_t t_delay_to_start_ms = 1000; // 1sec to start
+    uint64_t t_delay_to_start_ms = 3000; // 1sec to start
     bool sent_data = false;
-
+    
+    TrajectoryPoint trajectory_point;
     hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
 
             uint64_t t_now_ns = vehicle_state_list.t_now();
@@ -210,12 +212,16 @@ int main(int argc, char *argv[])
                 vector<TrajectoryPoint> trajectory_points;
                 sort(plan_for_vehicle.begin(),plan_for_vehicle.end(),compare_pose_time);
                 
-                // TrajectoryPoint trajectory_point;
-                // trajectory_point.px(vehicle_state.pose().x());
-                // trajectory_point.py(vehicle_state.pose().y());
+                if(!initialized_start_pose){
+                    trajectory_point.px(vehicle_state.pose().x());
+                    trajectory_point.py(vehicle_state.pose().y());
 
-                // trajectory_point.t().nanoseconds((-250 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
-                
+                    trajectory_point.t().nanoseconds((-1000 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                    initialized_start_pose = true;
+                }
+
+                trajectory_points.push_back(trajectory_point);
+
                 for(auto pose: plan_for_vehicle){ 
 
                         TrajectoryPoint trajectory_point;
@@ -223,7 +229,7 @@ int main(int argc, char *argv[])
                         trajectory_point.py(pose.pos[1] / 100);
 
                         dynamics::data::Vector2Df v_vel = {(pose.vel / 100.f), 0.f}; //cm/s -> m/s
-                        Eigen::Rotation2Df m_rot_h(pose.h );
+                        Eigen::Rotation2Df m_rot_h(pose.h);
                         auto v_h = m_rot_h * v_vel;
                         
                         trajectory_point.vx(v_h[0]);
@@ -234,10 +240,10 @@ int main(int argc, char *argv[])
                         "[G2F] Plan vehicle %u  %lf:%lf v%lf h%lf", vehicle_state.vehicle_id(), pose.pos[0],pose.pos[1],pose.vel, pose.h
                         );
 
-                        cpm::Logging::Instance().write(
-                        3,
-                        "[G2F] Plan vel vec %u  %lf:%lf at sim time %lf", vehicle_state.vehicle_id(), v_h[0], v_h[1], pose.time_ms
-                        );
+                        // cpm::Logging::Instance().write(
+                        // 3,
+                        // "[G2F] Plan vel vec %u  %lf:%lf at sim time %lf", vehicle_state.vehicle_id(), v_h[0], v_h[1], pose.time_ms
+                        // );
                         
                         uint32_t pose_time_ms = static_cast<uint32_t>(pose.time_ms);
                         trajectory_point.t().nanoseconds((pose_time_ms + t_ref_start_ms + t_delay_to_start_ms) * 1000000); //millisec to nanosec
