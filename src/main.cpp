@@ -171,9 +171,9 @@ int main(int argc, char *argv[])
 
 
                 dynamics::data::Pose2D target;
-                target.pos = {50.f,50.f};
+                target.pos = {30.f * index ,10.f};
                 target.vel = 0;
-                target.h = 0;
+                target.h = 1;
 
                 cpm::Logging::Instance().write(
                     1,
@@ -216,7 +216,7 @@ int main(int argc, char *argv[])
     bool initialized = false;
     bool initialized_start_pose = false;
     uint64_t t_ref_start_ms = 0;
-    uint64_t t_delay_to_start_ms = 1000; // 1sec to start
+    uint64_t t_delay_to_start_ms = 2000; // 1sec to start
     bool sent_data = false;
     
     //Log target/reference to file
@@ -268,21 +268,25 @@ int main(int argc, char *argv[])
                 vector<TrajectoryPoint> trajectory_points;
                 // sort(plan_for_vehicle.begin(),plan_for_vehicle.end(),compare_pose_time);
                 
-                if(!initialized_start_pose){
-                    trajectory_point.px(vehicle_state.pose().x());
-                    trajectory_point.py(vehicle_state.pose().y());
-                    trajectory_point.t().nanoseconds((-1000 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
-                    initialized_start_pose = true;
-                }
+                TrajectoryPoint trajectory_point;
+                trajectory_point.px(vehicle_state.pose().x());
+                trajectory_point.py(vehicle_state.pose().y());
 
-                trajectory_points.push_back(trajectory_point);
+                dynamics::data::Vector2Df v_vel = {0.f, 0.f}; //cm/s -> m/s
+                Eigen::Rotation2Df m_rot_h(vehicle_state.pose().yaw());
+                auto v_h = m_rot_h * v_vel;
+                        
+                trajectory_point.vx(v_h[0]);
+                trajectory_point.vy(v_h[1]);
 
-                for(uint32_t pose_index = 0; pose_index < plan_for_vehicle.size(); pose_index += 2){ 
-                        auto pose = plan_for_vehicle.at(pose_index);
+                trajectory_point.t().nanoseconds((-500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                
+                for(uint32_t i = 0; i < plan_for_vehicle.size(); i ++){ 
+                        auto pose = plan_for_vehicle.at(i);
 
                         TrajectoryPoint trajectory_point;
-                        trajectory_point.px(pose.pos[0] / 100);
-                        trajectory_point.py(pose.pos[1] / 100);
+                        trajectory_point.px(pose.pos[0] / 100.f);
+                        trajectory_point.py(pose.pos[1] / 100.f);
 
                         dynamics::data::Vector2Df v_vel = {(pose.vel / 100.f), 0.f}; //cm/s -> m/s
                         Eigen::Rotation2Df m_rot_h(pose.h);
@@ -301,7 +305,7 @@ int main(int argc, char *argv[])
                         // "[G2F] Plan vel vec %u  %lf:%lf at sim time %lf", vehicle_state.vehicle_id(), v_h[0], v_h[1], pose.time_ms
                         // );
                         
-                        uint32_t pose_time_ms = static_cast<uint32_t>(pose.time_ms);
+                        uint32_t pose_time_ms = static_cast<uint32_t>(pose.time_ms) + 50 * trajectory_points.size();
                         trajectory_point.t().nanoseconds((pose_time_ms + t_ref_start_ms + t_delay_to_start_ms) * 1000000); //millisec to nanosec
                         cpm::Logging::Instance().write(
                         1,
