@@ -242,6 +242,7 @@ int main(int argc, char *argv[])
                     "[G2F] Callback on Each Timestep at %ull", t_now_ms);
         
             uint32_t index = 0;
+            bool all_plans_finished = true;
             for(auto vehicle_state:vehicle_state_list.state_list())
             {
 
@@ -265,20 +266,10 @@ int main(int argc, char *argv[])
                 auto plan_for_vehicle = result.result[index].spline;
 
                 vector<TrajectoryPoint> trajectory_points;
-                // sort(plan_for_vehicle.begin(),plan_for_vehicle.end(),compare_pose_time);
-                
-                // TrajectoryPoint trajectory_point;
-                // trajectory_point.px(vehicle_state.pose().x());
-                // trajectory_point.py(vehicle_state.pose().y());
-
-                // dynamics::data::Vector2Df v_vel = {0.f, 0.f}; //cm/s -> m/s
-                // Eigen::Rotation2Df m_rot_h(vehicle_state.pose().yaw());
-                // auto v_h = m_rot_h * v_vel;
-                        
-                // trajectory_point.vx(v_h[0]);
-                // trajectory_point.vy(v_h[1]);
-
-                // trajectory_point.t().nanoseconds((-500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+               
+                if(t_now_ms < (plan_for_vehicle.at(plan_for_vehicle.size()).time_ms + t_ref_start_ms + t_delay_to_start_ms) * 1000000){
+                    all_plans_finished = false;
+                }
                 
 
                 uint32_t start_index = 0;
@@ -336,6 +327,15 @@ int main(int argc, char *argv[])
                     1,
                     "[G2F] Sent plan to vehicle %u with element count %u", vehicle_state.vehicle_id(), trajectory_points.size()
                     );
+
+                if(all_plans_finished){
+                    write_pose_with_time_information("actual_trajectories_" + std::to_string(t_now_ms) + ".json", actual_pose);
+                    write_pose_with_time_information("reference_trajectories_" + std::to_string(t_now_ms) + ".json", reference_pose);
+                    
+                    for(uint8_t id : vehicle_ids){
+                        hlc_communicator.stop(id);
+                    }
+                }   
 
             }
 
