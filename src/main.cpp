@@ -61,6 +61,7 @@ void write_pose_with_time_information(std::string filename,std::map<uint32_t,std
     
     for(auto veh: path){
         json jpath;
+        jpath["vehicle"] = veh.first;
         for(auto pose: veh.second){
             json jnode;
             jnode["px"] = pose.pos[0];
@@ -68,9 +69,9 @@ void write_pose_with_time_information(std::string filename,std::map<uint32_t,std
             jnode["ph"] = pose.h;
             jnode["pv"] = pose.vel;
             jnode["time_ms"] = pose.time_ms;
-            jpath.push_back(jnode);
+            jpath["path"].push_back(jnode);
         }
-        jresult[veh.first] = jpath;
+        jresult.push_back(jpath);
     }
 
     //dump file to disc
@@ -329,8 +330,8 @@ int main(int argc, char *argv[])
                     );
 
                 if(all_plans_finished){
-                    write_pose_with_time_information("actual_trajectories_" + std::to_string(t_now_ms) + ".json", actual_pose);
-                    write_pose_with_time_information("reference_trajectories_" + std::to_string(t_now_ms) + ".json", reference_pose);
+                    write_pose_with_time_information("actual_trajectories.json", actual_pose);
+                    write_pose_with_time_information("reference_trajectories.json", reference_pose);
                     
                     for(uint8_t id : vehicle_ids){
                         hlc_communicator.stop(id);
