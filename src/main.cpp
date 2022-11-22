@@ -184,7 +184,7 @@ int main(int argc, char *argv[])
                 auto start_pbi = planner.findNearestPoseByIndex(start);
                 start_positions.push_back(start_pbi);
                 std::cout << "START " << start_pbi.x << ":" << start_pbi.y << ":" << start_pbi.a << ":" << start_pbi.s << std::endl; 
-                dynamics::data::PoseByIndex target_pbi = {2,2,2,0}; 
+                dynamics::data::PoseByIndex target_pbi = {6 + 3 * index,6,6,0}; 
                 target_positions.push_back(target_pbi);
                  std::cout << "TARGET " << target_pbi.x << ":" << target_pbi.y << ":" << target_pbi.a << ":" << target_pbi.s << std::endl; 
                 index ++;
@@ -200,6 +200,16 @@ int main(int argc, char *argv[])
             result = planner.cbs(start_positions, target_positions);
             std::string name = std::to_string(t_now_s) + ".json";
             //planner.writeMultiplePathsToDisk(result, name);
+
+            //Log target/reference to file
+            for(auto vehicle_path: result.result){
+                for(auto ref_pose_with_time: vehicle_path.second.spline){
+                    
+                    reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
+                    cpm::Logging::Instance().write(1,"[G2F] Successfully set up planner and callbacks");
+                
+                }
+            }    
 
              cpm::Logging::Instance().write(
                     1,
@@ -219,13 +229,7 @@ int main(int argc, char *argv[])
     uint64_t t_ref_start_ms = 0;
     uint64_t t_delay_to_start_ms = 2000; // 1sec to start
     bool sent_data = false;
-    
-    //Log target/reference to file
-    for(auto vehicle_path: result.result){
-        for(auto ref_pose_with_time: vehicle_path.second.spline){
-            reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
-        }
-    }    
+    bool wrote_trajectory_data_to_disc = false;
 
     TrajectoryPoint trajectory_point;
     hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
@@ -268,7 +272,7 @@ int main(int argc, char *argv[])
 
                 vector<TrajectoryPoint> trajectory_points;
                
-                if(t_now_ms < (plan_for_vehicle.at(plan_for_vehicle.size()).time_ms + t_ref_start_ms + t_delay_to_start_ms) * 1000000){
+                if(t_now_ms < (plan_for_vehicle.at(plan_for_vehicle.size() - 1).time_ms + t_ref_start_ms + t_delay_to_start_ms)){
                     all_plans_finished = false;
                 }
                 
@@ -282,6 +286,7 @@ int main(int argc, char *argv[])
                         min_dist = (current_pos - plan_for_vehicle.at(i).pos).norm();
                         start_index = i;
                     }
+
                 }
 
                 for(uint32_t i = start_index; i < plan_for_vehicle.size() && i < start_index + 40; i ++){ 
@@ -329,13 +334,11 @@ int main(int argc, char *argv[])
                     "[G2F] Sent plan to vehicle %u with element count %u", vehicle_state.vehicle_id(), trajectory_points.size()
                     );
 
-                if(all_plans_finished){
-                    write_pose_with_time_information("actual_trajectories.json", actual_pose);
-                    write_pose_with_time_information("reference_trajectories.json", reference_pose);
+                if(all_plans_finished && !wrote_trajectory_data_to_disc){
+                    write_pose_with_time_information(std::to_string(t_now_ms) + "actual_trajectories.json", actual_pose);
+                    write_pose_with_time_information(std::to_string(t_now_ms) + "reference_trajectories.json", reference_pose);
+                    wrote_trajectory_data_to_disc = true;
                     
-                    for(uint8_t id : vehicle_ids){
-                        hlc_communicator.stop(id);
-                    }
                 }   
 
             }
