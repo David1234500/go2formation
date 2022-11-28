@@ -184,7 +184,7 @@ int main(int argc, char *argv[])
                 auto start_pbi = planner.findNearestPoseByIndex(start);
                 start_positions.push_back(start_pbi);
                 std::cout << "START " << start_pbi.x << ":" << start_pbi.y << ":" << start_pbi.a << ":" << start_pbi.s << std::endl; 
-                dynamics::data::PoseByIndex target_pbi = {6 + 3 * index,6,6,0}; 
+                dynamics::data::PoseByIndex target_pbi = {6 + 3 * index,6,6,1}; 
                 target_positions.push_back(target_pbi);
                  std::cout << "TARGET " << target_pbi.x << ":" << target_pbi.y << ":" << target_pbi.a << ":" << target_pbi.s << std::endl; 
                 index ++;
