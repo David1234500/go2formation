@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
 
             //Log target/reference to file
             for(auto vehicle_path: result.result){
-                for(auto ref_pose_with_time: vehicle_path.second.spline){
+                for(auto ref_pose_with_time: vehicle_path.second.interprimitive){
                     
                     reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
                     cpm::Logging::Instance().write(1,"[G2F] Successfully set up planner and callbacks");
