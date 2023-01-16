@@ -222,7 +222,7 @@ int main(int argc, char *argv[])
                 for(auto ref_pose_with_time: vehicle_path.second.interprimitive){
                     
                     reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
-                    cpm::Logging::Instance().write(1,"[G2F] Successfully set up planner and callbacks");
+                    // cpm::Logging::Instance().write(1,"[G2F] Successfully set up planner and callbacks");
                 
                 }
             }    
@@ -311,18 +311,7 @@ int main(int argc, char *argv[])
                 
 
                 uint32_t start_index = 0;
-                float min_dist = 1000000.f;
-                for(uint32_t i = 0; i < plan_for_vehicle.size(); i ++){ 
-                    dynamics::data::Vector2Df current_pos = {vehicle_state.pose().x() * 100,vehicle_state.pose().y() * 100};
-
-                    if((current_pos - plan_for_vehicle.at(i).pos).norm() < min_dist){
-                        min_dist = (current_pos - plan_for_vehicle.at(i).pos).norm();
-                        start_index = i;
-                    }
-
-                }
-
-                for(uint32_t i = start_index; i < plan_for_vehicle.size() && i < start_index + 40; i ++){ 
+                for(uint32_t i = start_index; i < plan_for_vehicle.size(); i ++){ 
 
                         auto pose = plan_for_vehicle.at(i);
 
