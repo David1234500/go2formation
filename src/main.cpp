@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
 
     ////////////// Set up CBS Planner /////////////////////////////////
     CBSPlanner planner;
-    planner.mp_comp.loadGraphFromDisk(Config::getInstance().get<std::string>({"mp_file"}));
+    planner.mp_comp.loadGraphFromDisk(Config::getInstance().get<std::string>({"mp_state_graph"}));
     constraint_node result;
 
 
@@ -106,6 +106,8 @@ int main(int argc, char *argv[])
     std::vector<dynamics::data::PoseByIndex> start_positions;
     std::vector<dynamics::data::PoseByIndex> target_positions;
     int32_t zero_velocity_level = Config::getInstance().get<int32_t>({"velocity","zero_velocity_level"});
+    bool send_off_map_edge = Config::getInstance().get<bool>({"test_yeet"});
+    bool use_example_targets = true;
 
     if(vehicle_poses_json != ""){
         cpm::Logging::Instance().write(loglevel,"[G2F] Got target positions from the commandline.");
@@ -120,6 +122,7 @@ int main(int argc, char *argv[])
             auto target_tbi = planner.findNearestPoseByIndex(target);
             target_positions.push_back(target_tbi);
         }
+        use_example_targets = false;
     }
 
     cpm::Logging::Instance().write(loglevel,"Startup, done preparing -> ready to go");
@@ -176,11 +179,15 @@ int main(int argc, char *argv[])
             start_positions.push_back(start_pbi);
             
             //Setup target positions vector -> if no positions have been set, then use demo ones
-            if(target_positions.empty()){
+            if(send_off_map_edge){
+                auto target_off_map = Config::getInstance().get<std::vector<double>>({"test_target_locations_drive_off"});
+                dynamics::data::PoseByIndex target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
+                target_positions.push_back(target_pbi);
+            }else if(use_example_targets){
                 int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
                 auto chosen_target = test_target_locations.at(target_index);
                 test_target_locations.erase(test_target_locations.begin() + target_index);
-                dynamics::data::PoseByIndex target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], zero_velocity_level};
+                dynamics::data::PoseByIndex target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
                 cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
                 target_positions.push_back(target_pbi);
             }
@@ -189,9 +196,9 @@ int main(int argc, char *argv[])
 
         //Execute the single shot planning
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
-        result = planner.cbs(start_positions, target_positions);
+        result = planner.cbs(start_positions, target_positions, false, send_off_map_edge);
         if(!result.feasible){
-           result = planner.cbs(start_positions, target_positions, true); 
+           result = planner.cbs(start_positions, target_positions, true, send_off_map_edge); 
            cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Constraint relaxation...");
         }
 
@@ -226,11 +233,13 @@ int main(int argc, char *argv[])
     hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
             
         int64_t t_now_ns = vehicle_state_list.t_now();
-        int64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         int64_t t_now_ms = t_now_ns / 1000000;
         
+        cpm::Logging::Instance().write(loglevel,"[G2F] Clock Delay %lld", (long long) (t_chrono_now_ns - t_now_ns));
         // This HLC takes forever so we skip all the old vehiclestates and get back to a somewhat recent state 
-        if(std::abs(t_chrono_now_ns - t_now_ns) < 110000000 ){
+        if(std::abs(t_chrono_now_ns - t_now_ns) > 110000000 ){
+            cpm::Logging::Instance().write(loglevel,"[G2F] Catching up in time %lld, starting to send trajectories... ", (long long) (t_chrono_now_ns - t_now_ns));
             return;
         }
 
