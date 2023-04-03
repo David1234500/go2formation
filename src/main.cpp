@@ -117,6 +117,7 @@ int main(int argc, char *argv[])
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> reference_pose;
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> actual_pose;
     int32_t zero_velocity_level = Config::getInstance().get<int32_t>({"velocity","zero_velocity_level"});
+    uint64_t completion_time_ms = 0;
 
     /////////////////////////////////Trajectory planner//////////////////////////////////////////
     hlc_communicator.onFirstTimestep([&](VehicleStateList vehicle_state_list) {
@@ -179,7 +180,11 @@ int main(int argc, char *argv[])
         //Execute the single shot planning
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
         result = planner.cbs(start_positions, target_positions);
-        
+        if(!result.feasible){
+           result = planner.cbs(start_positions, target_positions, true); 
+           cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Constraint relaxation...");
+        }
+
         if(!result.feasible){
             cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
             return;
@@ -191,6 +196,8 @@ int main(int argc, char *argv[])
 
         // Log predicted path to file for later comparison
         for(auto vehicle_path: result.result){
+            int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.spline.at(vehicle_path.second.spline.size() - 1).time_ms);
+            completion_time_ms = (last_pose_time_ms > completion_time_ms ? last_pose_time_ms : completion_time_ms);
             for(auto ref_pose_with_time: vehicle_path.second.spline ){
                 reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
             }
@@ -201,7 +208,7 @@ int main(int argc, char *argv[])
 
     // Some internal state flags and internal state keeping
     bool initialized = false;
-    int64_t t_delay_to_start_ms = 1000; 
+    int64_t t_delay_to_start_ms = 2000; 
     bool wrote_trajectory_data_to_disc = false;
     int64_t t_ref_start_ms = 0;
 
@@ -209,8 +216,14 @@ int main(int argc, char *argv[])
     hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
             
         int64_t t_now_ns = vehicle_state_list.t_now();
+        int64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         int64_t t_now_ms = t_now_ns / 1000000;
         
+        // This HLC takes forever so we skip all the old vehiclestates and get back to a somewhat recent state 
+        if(std::abs(t_chrono_now_ns - t_now_ns) < 110000000 ){
+            return;
+        }
+
         //First iteration is used to set internal time referece after compute
         if(!initialized){
             initialized = true;
@@ -241,10 +254,11 @@ int main(int argc, char *argv[])
 
             // If the plan has ended, note down for each 
             auto plan_for_vehicle = result.result[index].spline;
-            if(!wrote_trajectory_data_to_disc && (t_now_ms > (static_cast<uint64_t>(plan_for_vehicle.at(plan_for_vehicle.size() - 1).time_ms) + t_ref_start_ms + t_delay_to_start_ms))){
+            if(!wrote_trajectory_data_to_disc && (t_now_ms > (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms))){
                 write_pose_with_time_information(std::to_string(t_now_ms) + "_traj.json", actual_pose, reference_pose, t_ref_start_ms + t_delay_to_start_ms);
                 wrote_trajectory_data_to_disc = true;
                 cpm::Logging::Instance().write(loglevel,"[G2F] Saved driving vehicle recording to disk");
+                return;
             }
             
             // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
@@ -259,7 +273,8 @@ int main(int argc, char *argv[])
                     trajectory_point.py(pose.pos[1] / 100.f);
                     trajectory_point.vx((pose.vel / 100.f) * cos(pose.h));
                     trajectory_point.vy((pose.vel / 100.f) * sin(pose.h));
-                    trajectory_point.t().nanoseconds((pose.time_ms + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                    int64_t pose_time = static_cast<int64_t>(pose.time_ms);
+                    trajectory_point.t().nanoseconds((pose_time + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
                     trajectory_points.push_back(trajectory_point);
             }
 

@@ -11,7 +11,7 @@
         "dstep": 7.0,
         "hstep": 0.7853
     },
-    "allowed_reversing":2,
+    "allowed_reversing":1,
     "collision_detect":{
         "mode":"circle",
         "ov_appr_threshold": 100.0,
@@ -79,6 +79,8 @@
         "uni_sample_count":0,
         "rand_sample_count":200
     },
-    "test_target_locations":[[5,5,3],[5,20,3],[5,10,3],[5,30,3]],
+    "test_target_locations2":[[32,4,0],[60,28,1],[33,53,3],[5,29,6]],
+    "test_target_locations3":[[44,31,4],[30,40,5],[ 21,26,0],[34,18,1]],
+    "test_target_locations":[[9,5,6],[8,51,4],[ 56,50,3],[60,9,1]],
     "hlc_main_log_level":1
 }
