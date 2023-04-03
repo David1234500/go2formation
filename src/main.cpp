@@ -99,12 +99,32 @@ int main(int argc, char *argv[])
 
     std::cout << vehicle_ids_string << std::endl;
 
+    
+    const std::string vehicle_poses_json = cpm::cmd_parameter_string("poses", "", argc, argv);
+    const std::string mpfile_path = cpm::cmd_parameter_string("mpfile", "", argc, argv);
+
     ////////////// Initialization for trajectory planning /////////////////////////////////
     const uint64_t dt_nanos = 400000000ull;
     HLCCommunicator hlc_communicator(vehicle_ids);
     cpm::Writer<VehicleCommandTrajectoryPubSubType> writer_vehicleCommandTrajectory(
             hlc_communicator.getLocalParticipant()->get_participant(), 
             "vehicleCommandTrajectory");
+
+    // Parse Target positions passed from the commandline
+    auto pose_information = json::parse(vehicle_poses_json);
+    for(auto pose: pose_information){
+        std::cout << "Working on pose for vehicle with ID " << pose["id"] << std::endl;
+        std::cout << "Position " << pose["x"] << ":"  << pose["y"] << ":" << pose["yaw"] << std::endl;
+        
+        dynamics::data::Pose2D target;
+        target.h = pose["yaw"];
+        target.pos[0] = pose["x"];
+        target.pos[1] = pose["y"];
+        target.vel = zero_velocity_level;
+        
+        auto target_by_index = planner.findNearestPoseByIndex(target);
+        target_positions_map[pose["id"]] = target_by_index;
+    }
 
     ////////////// Set up CBS Planner /////////////////////////////////
     CBSPlanner planner;
