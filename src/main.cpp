@@ -86,22 +86,7 @@ int main(int argc, char *argv[])
         vehicle_ids.push_back(i);
     }
 
-    // const std::vector<double> vehicle_ids_int = cpm::cmd_parameter_double("vehicle_ids", {4}, argc, argv);
-
-    ////////////////Outstream in shell which vehicles were selected/////////////////////////////////
-    std::stringstream vehicle_ids_stream;
-    vehicle_ids_stream << "Vehicle IDs: ";
-    for (uint8_t id : vehicle_ids)
-    {
-        vehicle_ids_stream << static_cast<uint32_t>(id) << "|"; //Cast s.t. uint8_t is not interpreted as a character
-    }
-    std::string vehicle_ids_string = vehicle_ids_stream.str();
-
-    std::cout << vehicle_ids_string << std::endl;
-
-    
     const std::string vehicle_poses_json = cpm::cmd_parameter_string("poses", "", argc, argv);
-    const std::string mpfile_path = cpm::cmd_parameter_string("mpfile", "", argc, argv);
 
     ////////////// Initialization for trajectory planning /////////////////////////////////
     const uint64_t dt_nanos = 400000000ull;
@@ -109,34 +94,40 @@ int main(int argc, char *argv[])
     cpm::Writer<VehicleCommandTrajectoryPubSubType> writer_vehicleCommandTrajectory(
             hlc_communicator.getLocalParticipant()->get_participant(), 
             "vehicleCommandTrajectory");
-
-    // Parse Target positions passed from the commandline
-    auto pose_information = json::parse(vehicle_poses_json);
-    for(auto pose: pose_information){
-        std::cout << "Working on pose for vehicle with ID " << pose["id"] << std::endl;
-        std::cout << "Position " << pose["x"] << ":"  << pose["y"] << ":" << pose["yaw"] << std::endl;
-        
-        dynamics::data::Pose2D target;
-        target.h = pose["yaw"];
-        target.pos[0] = pose["x"];
-        target.pos[1] = pose["y"];
-        target.vel = zero_velocity_level;
-        
-        auto target_by_index = planner.findNearestPoseByIndex(target);
-        target_positions_map[pose["id"]] = target_by_index;
-    }
+    
 
     ////////////// Set up CBS Planner /////////////////////////////////
     CBSPlanner planner;
     planner.mp_comp.loadGraphFromDisk(Config::getInstance().get<std::string>({"mp_file"}));
     constraint_node result;
 
+
+    ////////////// Parse Target Positions from the Commandline /////////////////////////////////
+    std::vector<dynamics::data::PoseByIndex> start_positions;
+    std::vector<dynamics::data::PoseByIndex> target_positions;
+    int32_t zero_velocity_level = Config::getInstance().get<int32_t>({"velocity","zero_velocity_level"});
+
+    if(vehicle_poses_json != ""){
+        cpm::Logging::Instance().write(loglevel,"[G2F] Got target positions from the commandline.");
+        auto pose_information = json::parse(vehicle_poses_json);
+        for(auto pose: pose_information){
+            dynamics::data::Pose2D target;
+            target.h = pose["yaw"];
+            target.pos[0] = pose["x"];
+            target.pos[1] = pose["y"];
+            target.vel = zero_velocity_level;
+            
+            auto target_tbi = planner.findNearestPoseByIndex(target);
+            target_positions.push_back(target_tbi);
+        }
+    }
+
     cpm::Logging::Instance().write(loglevel,"Startup, done preparing -> ready to go");
 
     ////////////// Trajectory Storage /////////////////////////////////
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> reference_pose;
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> actual_pose;
-    int32_t zero_velocity_level = Config::getInstance().get<int32_t>({"velocity","zero_velocity_level"});
+    
     uint64_t completion_time_ms = 0;
 
     /////////////////////////////////Trajectory planner//////////////////////////////////////////
@@ -149,9 +140,6 @@ int main(int argc, char *argv[])
 
            
         uint32_t index = 0;
-        std::vector<dynamics::data::PoseByIndex> start_positions;
-        std::vector<dynamics::data::PoseByIndex> target_positions;
-
         auto test_target_locations = Config::getInstance().get<std::vector<std::vector<double>>>({"test_target_locations"});
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -183,17 +171,19 @@ int main(int argc, char *argv[])
                 }
             }
 
-            //Setup start and target position vectors
+            //Setup start positions vectors 
             cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned start position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), start_pbi.x,start_pbi.y,start_pbi.a);
             start_positions.push_back(start_pbi);
             
-            int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
-            auto chosen_target = test_target_locations.at(target_index);
-            test_target_locations.erase(test_target_locations.begin() + target_index);
-            dynamics::data::PoseByIndex target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], zero_velocity_level};
-            cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
-            target_positions.push_back(target_pbi);
-                
+            //Setup target positions vector -> if no positions have been set, then use demo ones
+            if(target_positions.empty()){
+                int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
+                auto chosen_target = test_target_locations.at(target_index);
+                test_target_locations.erase(test_target_locations.begin() + target_index);
+                dynamics::data::PoseByIndex target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], zero_velocity_level};
+                cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
+                target_positions.push_back(target_pbi);
+            }
             index ++;
         }
 
