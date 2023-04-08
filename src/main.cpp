@@ -207,15 +207,15 @@ int main(int argc, char *argv[])
             return;
         }
 
-        std::string name = std::to_string(t_now_s) + ".json";
-        planner.writeMultiplePathsToDisk(result, name);
+        // std::string name = std::to_string(t_now_s) + ".json";
+        // planner.writeMultiplePathsToDisk(result, name);
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS finished planning, now executing plan");
 
         // Log predicted path to file for later comparison
         for(auto vehicle_path: result.result){
-            int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.spline.at(vehicle_path.second.spline.size() - 1).time_ms);
+            int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.interprimitive.at(vehicle_path.second.interprimitive.size() - 1).time_ms);
             completion_time_ms = (last_pose_time_ms > completion_time_ms ? last_pose_time_ms : completion_time_ms);
-            for(auto ref_pose_with_time: vehicle_path.second.spline ){
+            for(auto ref_pose_with_time: vehicle_path.second.interprimitive ){
                 reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
             }
         }    
@@ -272,7 +272,7 @@ int main(int argc, char *argv[])
 
 
             // If the plan has ended, note down for each 
-            auto plan_for_vehicle = result.result[index].spline;
+            auto plan_for_vehicle = result.result[index].interprimitive;
             if(!wrote_trajectory_data_to_disc && (t_now_ms > (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms))){
                 write_pose_with_time_information(std::to_string(t_now_ms) + "_traj.json", actual_pose, reference_pose, t_ref_start_ms + t_delay_to_start_ms);
                 wrote_trajectory_data_to_disc = true;
@@ -282,7 +282,7 @@ int main(int argc, char *argv[])
             
             // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
             std::vector<TrajectoryPoint> trajectory_points;
-            for(uint32_t i = 0; i < plan_for_vehicle.size(); i ++){ 
+            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
 
                     auto pose = plan_for_vehicle.at(i);
 
