@@ -25,6 +25,29 @@
 
 using json = nlohmann::json;
 
+void appendPosesToFile(const PoseByIndex& startPose, const PoseByIndex& targetPose, const std::string& filename) {
+    nlohmann::json jsonPoseArray;
+
+    // Read existing data from the file
+    std::ifstream inputFile(filename);
+    if (inputFile.good()) {
+        inputFile >> jsonPoseArray;
+        inputFile.close();
+    }
+
+    // Serialize startPose and targetPose
+    nlohmann::json jsonStartPose = {{"x", startPose.x}, {"y", startPose.y}, {"a", startPose.a}, {"s", startPose.s}, {"t", startPose.t}};
+    nlohmann::json jsonTargetPose = {{"x", targetPose.x}, {"y", targetPose.y}, {"a", targetPose.a}, {"s", targetPose.s}, {"t", targetPose.t}};
+
+    // Append the poses to the JSON array
+    jsonPoseArray.push_back(jsonStartPose);
+    jsonPoseArray.push_back(jsonTargetPose);
+
+    // Write the JSON array back to the file
+    std::ofstream outputFile(filename, std::ios::trunc);
+    outputFile << jsonPoseArray.dump(4); // 4 spaces for indentation
+    outputFile.close();
+}
 
 void write_pose_with_time_information(std::string filename,std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> actual, std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> ref, uint64_t time_ref_ms){
     json jresult;
@@ -191,6 +214,8 @@ int main(int argc, char *argv[])
                 cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
                 target_positions.push_back(target_pbi);
             }
+
+            appendPosesToFile(start_pbi, target_pbi, "../pose_data.json");
             index ++;
         }
 
