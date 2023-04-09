@@ -25,8 +25,8 @@
 
 using json = nlohmann::json;
 
-void appendPosesToFile(const PoseByIndex& startPose, const PoseByIndex& targetPose, const std::string& filename) {
-    nlohmann::json jsonPoseArray;
+void appendPosesToFile(const dynamics::data::PoseByIndex& startPose, const dynamics::data::PoseByIndex& targetPose, const std::string& filename) {
+    json jsonPoseArray;
 
     // Read existing data from the file
     std::ifstream inputFile(filename);
@@ -36,12 +36,12 @@ void appendPosesToFile(const PoseByIndex& startPose, const PoseByIndex& targetPo
     }
 
     // Serialize startPose and targetPose
-    nlohmann::json jsonStartPose = {{"x", startPose.x}, {"y", startPose.y}, {"a", startPose.a}, {"s", startPose.s}, {"t", startPose.t}};
-    nlohmann::json jsonTargetPose = {{"x", targetPose.x}, {"y", targetPose.y}, {"a", targetPose.a}, {"s", targetPose.s}, {"t", targetPose.t}};
+    json jsonStartPose = {{"x", startPose.x}, {"y", startPose.y}, {"a", startPose.a}, {"s", startPose.s}, {"t", startPose.t}};
+    json jsonTargetPose = {{"x", targetPose.x}, {"y", targetPose.y}, {"a", targetPose.a}, {"s", targetPose.s}, {"t", targetPose.t}};
+    json comb = {{"start", jsonStartPose}, {"target", jsonTargetPose}};
 
     // Append the poses to the JSON array
     jsonPoseArray.push_back(jsonStartPose);
-    jsonPoseArray.push_back(jsonTargetPose);
 
     // Write the JSON array back to the file
     std::ofstream outputFile(filename, std::ios::trunc);
@@ -202,15 +202,16 @@ int main(int argc, char *argv[])
             start_positions.push_back(start_pbi);
             
             //Setup target positions vector -> if no positions have been set, then use demo ones
+            dynamics::data::PoseByIndex target_pbi;
             if(send_off_map_edge){
                 auto target_off_map = Config::getInstance().get<std::vector<double>>({"test_target_locations_drive_off"});
-                dynamics::data::PoseByIndex target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
+                target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
                 target_positions.push_back(target_pbi);
             }else if(use_example_targets){
                 int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
                 auto chosen_target = test_target_locations.at(target_index);
                 test_target_locations.erase(test_target_locations.begin() + target_index);
-                dynamics::data::PoseByIndex target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
+                target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
                 cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
                 target_positions.push_back(target_pbi);
             }
@@ -307,7 +308,7 @@ int main(int argc, char *argv[])
             
             // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
             std::vector<TrajectoryPoint> trajectory_points;
-            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
+            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 6){ 
 
                     auto pose = plan_for_vehicle.at(i);
 
