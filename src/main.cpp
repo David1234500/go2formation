@@ -296,6 +296,30 @@ int main(int argc, char *argv[])
             current_pose.time_ms = t_now_ms - t_ref_start_ms - t_delay_to_start_ms;
             actual_pose[vehicle_state.vehicle_id()].push_back(current_pose);
 
+            double threshold = 20.0; 
+
+            // Find the closest point in the plan for the current vehicle state
+            double min_distance = std::numeric_limits<double>::max();
+            dynamics::data::Pose2WithTime closest_pose;
+
+            for (const auto& pose : plan_for_vehicle) {
+                double distance = (current_pose.pos - pose.pos).norm();
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    closest_pose = pose;
+                }
+            }
+
+            // Check if the vehicle is diverging more than the threshold from the plan
+            if (min_distance > threshold) {
+                cpm::Logging::Instance().write(
+                    loglevel, "[G2F] Vehicle %u is diverging from the plan by %f units",
+                    vehicle_state.vehicle_id(), min_distance
+                );
+
+                // TODO potentially recompute trajectory and try again
+            }
+
 
             // If the plan has ended, note down for each 
             auto plan_for_vehicle = result.result[index].interprimitive;
@@ -308,7 +332,7 @@ int main(int argc, char *argv[])
             
             // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
             std::vector<TrajectoryPoint> trajectory_points;
-            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 6){ 
+            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
 
                     auto pose = plan_for_vehicle.at(i);
 
