@@ -5,10 +5,13 @@
 #include "cpm/init.hpp"                         //->cpm_lib->include->cpm
 #include "cpm/Writer.hpp"
 #include "cpm/dds/VehicleCommandTrajectoryPubSubTypes.h"
+#include "cpm/dds/VehicleObservationPubSubTypes.h"
 #include "VehicleStateListPubSubTypes.h"
 #include "VehicleCommandTrajectoryPubSubTypes.h"
 #include "cpm/Participant.hpp"
 #include "cpm/HLCCommunicator.hpp"
+#include "cpm/MultiVehicleReader.hpp"
+#include "cpm/Timer.hpp"                        
 
 #include <iostream>
 #include <sstream>
@@ -112,12 +115,9 @@ int main(int argc, char *argv[])
     const std::string vehicle_poses_json = cpm::cmd_parameter_string("poses", "", argc, argv);
 
     ////////////// Initialization for trajectory planning /////////////////////////////////
-    const uint64_t dt_nanos = 400000000ull;
-    HLCCommunicator hlc_communicator(vehicle_ids);
     cpm::Writer<VehicleCommandTrajectoryPubSubType> writer_vehicleCommandTrajectory(
-            hlc_communicator.getLocalParticipant()->get_participant(), 
             "vehicleCommandTrajectory");
-    
+    cpm::MultiVehicleReader<VehicleObservationPubSubType> ips_reader("vehicleObservation", vehicle_ids);
 
     ////////////// Set up CBS Planner /////////////////////////////////
     CBSPlanner planner;
@@ -156,98 +156,118 @@ int main(int argc, char *argv[])
     
     uint64_t completion_time_ms = 0;
 
+    auto now = std::chrono::system_clock::now();
+    uint64_t t_now = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
     /////////////////////////////////Trajectory planner//////////////////////////////////////////
-    hlc_communicator.onFirstTimestep([&](VehicleStateList vehicle_state_list) {
-        
-        uint64_t t_start_plan_ns = vehicle_state_list.t_now();
-        uint64_t t_now_s = t_start_plan_ns / 1000000000;
-        
-        cpm::Logging::Instance().write(loglevel,"[G2F] Callback onFirst Timestep at %ull", t_now_s);
+    
+    std::map<uint8_t, VehicleObservation> ips_sample;
+    std::map<uint8_t, uint64_t> ips_sample_age;
+    ips_reader.get_samples(t_now, ips_sample, ips_sample_age);
+    //check for vehicles if online
+    bool all_vehicles_online = true;
+    for (auto e : ips_sample_age) {
+        if (e.second > 1000000000ull) {
+            all_vehicles_online = false;
+            auto data = ips_sample.at(e.first);
+            auto new_id = data.vehicle_id();
+            std::cout << "Waiting for " << int(new_id) << std::endl;
+        }
+    }
 
-           
-        uint32_t index = 0;
-        auto test_target_locations = Config::getInstance().get<std::vector<std::vector<double>>>({"test_target_locations"});
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> distr(0, test_target_locations.size());
+    if (!all_vehicles_online) {
+        cpm::Logging::Instance().write(
+            3,
+            "Waiting for %s ...",
+            "vehicles"
+        );
+        return;
+    }
+    
+    cpm::Logging::Instance().write(loglevel,"[G2F] Callback onFirst Timestep at %ull", (t_now / 1000000000));
 
-        
-        for(auto vehicle_state:vehicle_state_list.state_list())
-        {
-        
-            cpm::Logging::Instance().write(loglevel,"[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", vehicle_state.vehicle_id(), vehicle_state.pose().x(),vehicle_state.pose().y(),vehicle_state.pose().yaw());
+    uint32_t index = 0;
+    auto test_target_locations = Config::getInstance().get<std::vector<std::vector<double>>>({"test_target_locations"});
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distr(0, test_target_locations.size());
 
-            // Compute available vehicle start positions (just for logging)
-            dynamics::data::Pose2D start;
-            start.pos = {vehicle_state.pose().x() * 100,vehicle_state.pose().y() * 100};
-            start.h = vehicle_state.pose().yaw();
-            start.vel = 0;
+    
+    for (auto e : ips_sample) {
+        auto data = e.second;
+        auto new_id = data.vehicle_id();
+        auto new_pose = data.pose();
 
-            // Log Start state to velocity recording
-            dynamics::data::Pose2WithTime start_pose;
-            start_pose = start;
-            start_pose.time_ms = t_start_plan_ns / 1000000;
-            actual_pose[vehicle_state.vehicle_id()].push_back(start_pose);
+        cpm::Logging::Instance().write(loglevel,"[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", new_id, new_pose.x(),new_pose.y(),new_pose.yaw());
 
-            // Compute representation in Discretised State Representation
-            auto start_pbi = planner.findNearestPoseByIndex(start);
-            for (const auto& existing_pbi : start_positions) {
-                if (start_pbi.x == existing_pbi.x && start_pbi.y == existing_pbi.y) {
-                    start_pbi.x += 1; //Collision Hack :)
-                }
+        // Compute available vehicle start positions (just for logging)
+        dynamics::data::Pose2D start;
+        start.pos = {new_pose.x() * 100,new_pose.y() * 100};
+        start.h = new_pose.yaw();
+        start.vel = 0;
+
+        // Log Start state to velocity recording
+        dynamics::data::Pose2WithTime start_pose;
+        start_pose = start;
+        start_pose.time_ms = t_now / 1000000;
+        actual_pose[new_id].push_back(start_pose);
+
+        // Compute representation in Discretised State Representation
+        auto start_pbi = planner.findNearestPoseByIndex(start);
+        for (const auto& existing_pbi : start_positions) {
+            if (start_pbi.x == existing_pbi.x && start_pbi.y == existing_pbi.y) {
+                start_pbi.x += 1; //Collision Hack :)
             }
-
-            //Setup start positions vectors 
-            cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned start position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), start_pbi.x,start_pbi.y,start_pbi.a);
-            start_positions.push_back(start_pbi);
-            
-            //Setup target positions vector -> if no positions have been set, then use demo ones
-            dynamics::data::PoseByIndex target_pbi;
-            if(send_off_map_edge){
-                auto target_off_map = Config::getInstance().get<std::vector<double>>({"test_target_locations_drive_off"});
-                target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
-                target_positions.push_back(target_pbi);
-            }else if(use_example_targets){
-                int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
-                auto chosen_target = test_target_locations.at(target_index);
-                test_target_locations.erase(test_target_locations.begin() + target_index);
-                target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
-                cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", vehicle_state.vehicle_id(), target_pbi.x,target_pbi.y,target_pbi.a);
-                target_positions.push_back(target_pbi);
-            }
-
-            appendPosesToFile(start_pbi, target_pbi, "../pose_data.json");
-            index ++;
         }
 
-        //Execute the single shot planning
-        cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
-        result = planner.cbs(start_positions, target_positions, false, send_off_map_edge);
-        if(!result.feasible){
-           result = planner.cbs(start_positions, target_positions, true, send_off_map_edge); 
-           cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Constraint relaxation...");
+        //Setup start positions vectors 
+        cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned start position %ld:%ld and heading %ld", new_id, start_pbi.x,start_pbi.y,start_pbi.a);
+        start_positions.push_back(start_pbi);
+        
+        //Setup target positions vector -> if no positions have been set, then use demo ones
+        dynamics::data::PoseByIndex target_pbi;
+        if(send_off_map_edge){
+            auto target_off_map = Config::getInstance().get<std::vector<double>>({"test_target_locations_drive_off"});
+            target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
+            target_positions.push_back(target_pbi);
+        }else if(use_example_targets){
+            int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
+            auto chosen_target = test_target_locations.at(target_index);
+            test_target_locations.erase(test_target_locations.begin() + target_index);
+            target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
+            cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", new_id, target_pbi.x,target_pbi.y,target_pbi.a);
+            target_positions.push_back(target_pbi);
         }
 
-        if(!result.feasible){
-            cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
-            return;
+        appendPosesToFile(start_pbi, target_pbi, "../pose_data.json");
+        index ++;
+    }
+
+    //Execute the single shot planning
+    cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
+    result = planner.cbs(start_positions, target_positions, false, send_off_map_edge);
+    if(!result.feasible){
+        result = planner.cbs(start_positions, target_positions, true, send_off_map_edge); 
+        cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Constraint relaxation...");
+    }
+
+    if(!result.feasible){
+        cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
+        return;
+    }
+
+    cpm::Logging::Instance().write(loglevel,"[G2F] CBS finished planning, now executing plan");
+
+    // Log predicted path to file for later comparison
+    for(auto vehicle_path: result.result){
+        int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.interprimitive.at(vehicle_path.second.interprimitive.size() - 1).time_ms);
+        completion_time_ms = (last_pose_time_ms > completion_time_ms ? last_pose_time_ms : completion_time_ms);
+        for(auto ref_pose_with_time: vehicle_path.second.interprimitive ){
+            reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
         }
+    }    
+    
 
-        // std::string name = std::to_string(t_now_s) + ".json";
-        // planner.writeMultiplePathsToDisk(result, name);
-        cpm::Logging::Instance().write(loglevel,"[G2F] CBS finished planning, now executing plan");
-
-        // Log predicted path to file for later comparison
-        for(auto vehicle_path: result.result){
-            int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.interprimitive.at(vehicle_path.second.interprimitive.size() - 1).time_ms);
-            completion_time_ms = (last_pose_time_ms > completion_time_ms ? last_pose_time_ms : completion_time_ms);
-            for(auto ref_pose_with_time: vehicle_path.second.interprimitive ){
-                reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
-            }
-        }    
-    });
-
-    cpm::Logging::Instance().write(loglevel,"[G2F] Successfully set up planner and callbacks");
 
     // Some internal state flags and internal state keeping
     bool initialized = false;
@@ -256,11 +276,13 @@ int main(int argc, char *argv[])
     int64_t t_ref_start_ms = 0;
 
     TrajectoryPoint trajectory_point;
-    hlc_communicator.onEachTimestep([&](VehicleStateList vehicle_state_list) {
+    const uint64_t dt_nanos = 200000000ull;
+    auto timer = cpm::Timer::create("G2FHLC", dt_nanos, 0, false, true, false);
+    timer->start([&](uint64_t t_now_ns) {
             
-        int64_t t_now_ns = vehicle_state_list.t_now();
-        int64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        int64_t t_now_ms = t_now_ns / 1000000;
+        
+        uint64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        uint64_t t_now_ms = t_now_ns / 1000000;
         
         cpm::Logging::Instance().write(loglevel,"[G2F] Clock Delay %lld", (long long) (t_chrono_now_ns - t_now_ns));
         // This HLC takes forever so we skip all the old vehiclestates and get back to a somewhat recent state 
@@ -285,82 +307,88 @@ int main(int argc, char *argv[])
     
         uint32_t index = 0;
         bool all_plans_finished = true;
-        for(auto vehicle_state:vehicle_state_list.state_list())
-        {
+         std::map<uint8_t, VehicleObservation> ips_sample;
+        std::map<uint8_t, uint64_t> ips_sample_age;
+        ips_reader.get_samples(t_now, ips_sample, ips_sample_age);
+        //check for vehicles if online
+        bool all_vehicles_online = true;
+        for (auto e : ips_sample_age) {
+            if (e.second > 1000000000ull) {
+                auto data = e.second;
+                auto new_id = data.vehicle_id();
+                auto new_pose = data.pose();
 
-            // Log true vehicle state to vector for later comparison
-            dynamics::data::Pose2WithTime current_pose;
-            current_pose.pos = {vehicle_state.pose().x() * 100,vehicle_state.pose().y() * 100};
-            current_pose.h = vehicle_state.pose().yaw();
-            current_pose.vel = vehicle_state.speed() * 100;
-            current_pose.time_ms = t_now_ms - t_ref_start_ms - t_delay_to_start_ms;
-            actual_pose[vehicle_state.vehicle_id()].push_back(current_pose);
+                // Log true vehicle state to vector for later comparison
+                dynamics::data::Pose2WithTime current_pose;
+                current_pose.pos = {new_pose.x() * 100,new_pose.y() * 100};
+                current_pose.h = new_pose.yaw();
+                current_pose.vel = new_pose.speed() * 100;
+                current_pose.time_ms = t_now_ms - t_ref_start_ms - t_delay_to_start_ms;
+                actual_pose[new_id].push_back(current_pose);
 
-            double threshold = 20.0; 
+                double threshold = 20.0; 
+                auto plan_for_vehicle = result.result[index].interprimitive;
 
-            // Find the closest point in the plan for the current vehicle state
-            double min_distance = std::numeric_limits<double>::max();
-            dynamics::data::Pose2WithTime closest_pose;
-
-            for (const auto& pose : plan_for_vehicle) {
-                double distance = (current_pose.pos - pose.pos).norm();
-                if (distance < min_distance) {
-                    min_distance = distance;
-                    closest_pose = pose;
+                // Find the closest point in the plan for the current vehicle state
+                double min_distance = std::numeric_limits<double>::max();
+                dynamics::data::Pose2WithTime closest_pose;
+                for (const auto& pose : plan_for_vehicle) {
+                    double distance = (current_pose.pos - pose.pos).norm();
+                    if (distance < min_distance) {
+                        min_distance = distance;
+                        closest_pose = pose;
+                    }
                 }
+
+                // Check if the vehicle is diverging more than the threshold from the plan
+                if (min_distance > threshold) {
+                    cpm::Logging::Instance().write(
+                        loglevel, "[G2F] Vehicle %u is diverging from the plan by %f units",
+                        new_id, min_distance
+                    );
+
+                    // TODO potentially recompute trajectory and try again
+                }
+
+
+                // If the plan has ended, note down for each 
+                if(!wrote_trajectory_data_to_disc && (t_now_ms > (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms))){
+                    write_pose_with_time_information(std::to_string(t_now_ms) + "_traj.json", actual_pose, reference_pose, t_ref_start_ms + t_delay_to_start_ms);
+                    wrote_trajectory_data_to_disc = true;
+                    cpm::Logging::Instance().write(loglevel,"[G2F] Saved driving vehicle recording to disk");
+                    return;
+                }
+                
+                // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
+                std::vector<TrajectoryPoint> trajectory_points;
+                for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
+
+                        auto pose = plan_for_vehicle.at(i);
+
+                        // Transform back from internal coordinate system to Lab system
+                        TrajectoryPoint trajectory_point;
+                        trajectory_point.px(pose.pos[0] / 100.f);
+                        trajectory_point.py(pose.pos[1] / 100.f);
+                        trajectory_point.vx((pose.vel / 100.f) * cos(pose.h));
+                        trajectory_point.vy((pose.vel / 100.f) * sin(pose.h));
+                        int64_t pose_time = static_cast<int64_t>(pose.time_ms);
+                        trajectory_point.t().nanoseconds((pose_time + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                        trajectory_points.push_back(trajectory_point);
+                }
+
+                // Send the trajecory using the inbuild functions
+                VehicleCommandTrajectory vehicle_command_trajectory;
+                vehicle_command_trajectory.vehicle_id(new_id);
+                vehicle_command_trajectory.trajectory_points(trajectory_points);
+                vehicle_command_trajectory.header().create_stamp().nanoseconds(t_now_ns);
+                vehicle_command_trajectory.header().valid_after_stamp().nanoseconds(t_now_ns + 1000000000ull);
+                writer_vehicleCommandTrajectory.write(vehicle_command_trajectory);
+
+                index ++;
+                cpm::Logging::Instance().write(loglevel,"[G2F] Sent plan to vehicle %u with element count %u", new_id, trajectory_points.size());
             }
-
-            // Check if the vehicle is diverging more than the threshold from the plan
-            if (min_distance > threshold) {
-                cpm::Logging::Instance().write(
-                    loglevel, "[G2F] Vehicle %u is diverging from the plan by %f units",
-                    vehicle_state.vehicle_id(), min_distance
-                );
-
-                // TODO potentially recompute trajectory and try again
-            }
-
-
-            // If the plan has ended, note down for each 
-            auto plan_for_vehicle = result.result[index].interprimitive;
-            if(!wrote_trajectory_data_to_disc && (t_now_ms > (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms))){
-                write_pose_with_time_information(std::to_string(t_now_ms) + "_traj.json", actual_pose, reference_pose, t_ref_start_ms + t_delay_to_start_ms);
-                wrote_trajectory_data_to_disc = true;
-                cpm::Logging::Instance().write(loglevel,"[G2F] Saved driving vehicle recording to disk");
-                return;
-            }
-            
-            // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
-            std::vector<TrajectoryPoint> trajectory_points;
-            for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
-
-                    auto pose = plan_for_vehicle.at(i);
-
-                    // Transform back from internal coordinate system to Lab system
-                    TrajectoryPoint trajectory_point;
-                    trajectory_point.px(pose.pos[0] / 100.f);
-                    trajectory_point.py(pose.pos[1] / 100.f);
-                    trajectory_point.vx((pose.vel / 100.f) * cos(pose.h));
-                    trajectory_point.vy((pose.vel / 100.f) * sin(pose.h));
-                    int64_t pose_time = static_cast<int64_t>(pose.time_ms);
-                    trajectory_point.t().nanoseconds((pose_time + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
-                    trajectory_points.push_back(trajectory_point);
-            }
-
-            // Send the trajecory using the inbuild functions
-            VehicleCommandTrajectory vehicle_command_trajectory;
-            vehicle_command_trajectory.vehicle_id(vehicle_state.vehicle_id());
-            vehicle_command_trajectory.trajectory_points(trajectory_points);
-            vehicle_command_trajectory.header().create_stamp().nanoseconds(t_now_ns);
-            vehicle_command_trajectory.header().valid_after_stamp().nanoseconds(t_now_ns + 1000000000ull);
-            writer_vehicleCommandTrajectory.write(vehicle_command_trajectory);
-
-            index ++;
-            cpm::Logging::Instance().write(loglevel,"[G2F] Sent plan to vehicle %u with element count %u", vehicle_state.vehicle_id(), trajectory_points.size());
         }
     });
 
     cpm::Logging::Instance().write(loglevel,"[G2F] Startup :D");
-
-    hlc_communicator.start();
 }
