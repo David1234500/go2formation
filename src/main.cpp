@@ -100,8 +100,9 @@ bool compare_pose_time(dynamics::data::Pose2WithTime d1, dynamics::data::Pose2Wi
 int main(int argc, char *argv[])
 {   //////////////////Set logging details///////////////////////////////////////////////////////////
     cpm::init(argc, argv);
+    const std::string config = cpm::cmd_parameter_string("config", "", argc, argv);
     cpm::Logging::Instance().set_id("G2FHLC");
-    int32_t loglevel = Config::getInstance().get<int32_t>({"hlc_main_log_level"});
+    int32_t loglevel = Config::getInstance(config).get<int32_t>({"hlc_main_log_level"});
 
     const std::vector<int> vehicle_ids_int = cpm::cmd_parameter_ints("vehicle_ids", {4}, argc, argv);
     std::vector<uint8_t> vehicle_ids;
@@ -359,7 +360,7 @@ int main(int argc, char *argv[])
                 
                 // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
                 std::vector<TrajectoryPoint> trajectory_points;
-                for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 4){ 
+                for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 6){ 
 
                         auto pose = plan_for_vehicle.at(i);
 
