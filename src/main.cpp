@@ -181,7 +181,7 @@ int main(int argc, char *argv[])
             "Waiting for %s ...",
             "vehicles"
         );
-        return;
+        return -1;
     }
     
     cpm::Logging::Instance().write(loglevel,"[G2F] Callback onFirst Timestep at %ull", (t_now / 1000000000));
@@ -253,7 +253,7 @@ int main(int argc, char *argv[])
 
     if(!result.feasible){
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
-        return;
+        return -1;
     }
 
     cpm::Logging::Instance().write(loglevel,"[G2F] CBS finished planning, now executing plan");
@@ -281,12 +281,12 @@ int main(int argc, char *argv[])
     timer->start([&](uint64_t t_now_ns) {
             
         
-        uint64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        uint64_t t_now_ms = t_now_ns / 1000000;
+        int64_t t_chrono_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        int64_t t_now_ms = t_now_ns / 1000000;
         
         cpm::Logging::Instance().write(loglevel,"[G2F] Clock Delay %lld", (long long) (t_chrono_now_ns - t_now_ns));
         // This HLC takes forever so we skip all the old vehiclestates and get back to a somewhat recent state 
-        if(std::abs(t_chrono_now_ns - t_now_ns) > 110000000 ){
+        if(std::abs(t_chrono_now_ns - static_cast<int64_t>(t_now_ns)) > 110000000 ){
             cpm::Logging::Instance().write(loglevel,"[G2F] Catching up in time %lld, starting to send trajectories... ", (long long) (t_chrono_now_ns - t_now_ns));
             return;
         }
@@ -312,8 +312,7 @@ int main(int argc, char *argv[])
         ips_reader.get_samples(t_now, ips_sample, ips_sample_age);
         //check for vehicles if online
         bool all_vehicles_online = true;
-        for (auto e : ips_sample_age) {
-            if (e.second > 1000000000ull) {
+        for (auto e : ips_sample) {
                 auto data = e.second;
                 auto new_id = data.vehicle_id();
                 auto new_pose = data.pose();
@@ -322,7 +321,6 @@ int main(int argc, char *argv[])
                 dynamics::data::Pose2WithTime current_pose;
                 current_pose.pos = {new_pose.x() * 100,new_pose.y() * 100};
                 current_pose.h = new_pose.yaw();
-                current_pose.vel = new_pose.speed() * 100;
                 current_pose.time_ms = t_now_ms - t_ref_start_ms - t_delay_to_start_ms;
                 actual_pose[new_id].push_back(current_pose);
 
@@ -387,7 +385,7 @@ int main(int argc, char *argv[])
                 index ++;
                 cpm::Logging::Instance().write(loglevel,"[G2F] Sent plan to vehicle %u with element count %u", new_id, trajectory_points.size());
             }
-        }
+        
     });
 
     cpm::Logging::Instance().write(loglevel,"[G2F] Startup :D");
