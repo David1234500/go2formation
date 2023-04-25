@@ -127,8 +127,12 @@ int main(int argc, char *argv[])
 
 
     ////////////// Parse Target Positions from the Commandline /////////////////////////////////
-    std::vector<dynamics::data::PoseByIndex> start_positions;
-    std::vector<dynamics::data::PoseByIndex> target_positions;
+    std::map<uint32_t,dynamics::data::PoseByIndex> start_positions;
+    std::map<uint32_t,std::vector<dynamics::data::Pose2D>> start_poses;
+    std::map<uint32_t,dynamics::data::PoseByIndex> target_positions;
+    std::map<uint32_t,std::vector<dynamics::data::Pose2D>> target_poses;
+
+
     int32_t zero_velocity_level = Config::getInstance().get<int32_t>({"velocity","zero_velocity_level"});
     bool send_off_map_edge = Config::getInstance().get<bool>({"test_yeet"});
     bool use_example_targets = true;
@@ -139,14 +143,18 @@ int main(int argc, char *argv[])
         for(auto pose: pose_information){
             dynamics::data::Pose2D target;
             std::cout << "[G2F] Got target pose " << pose << ":" << pose["yaw"] << ":" << pose["x"] << ":" << pose["y"]<< std::endl;
+            
             target.h = pose["yaw"].get<float>();
             target.pos[0] = pose["x"].get<float>() * 100;
             target.pos[1] = pose["y"].get<float>() * 100;
             target.vel = 0;
+            target_poses[pose["id"]] = target;
+
             cpm::Logging::Instance().write(loglevel,"[G2F]Got vehicle with position %lf:%lf and heading %lf", pose["x"],pose["y"], pose["yaw"]);
             auto target_tbi = planner.findNearestPoseByIndex(target);
             cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle was assigned target position %ld:%ld and heading %ld", target_tbi.x,target_tbi.y,target_tbi.a);
-            target_positions.push_back(target_tbi);
+            
+            target_positions[pose["id"]] = target_tbi;
         }
         use_example_targets = false;
     }
@@ -154,6 +162,7 @@ int main(int argc, char *argv[])
     cpm::Logging::Instance().write(loglevel,"Startup, done preparing -> ready to go");
 
     ////////////// Trajectory Storage /////////////////////////////////
+    
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> reference_pose;
     std::map<uint32_t,std::vector<dynamics::data::Pose2WithTime>> actual_pose;
     
@@ -200,7 +209,6 @@ int main(int argc, char *argv[])
         auto data = e.second;
         auto new_id = data.vehicle_id();
         auto new_pose = data.pose();
-
         cpm::Logging::Instance().write(loglevel,"[G2F]Got vehicle: %u with position %lf:%lf and heading %lf", new_id, new_pose.x(),new_pose.y(),new_pose.yaw());
 
         // Compute available vehicle start positions (just for logging)
@@ -214,6 +222,7 @@ int main(int argc, char *argv[])
         start_pose = start;
         start_pose.time_ms = t_now / 1000000;
         actual_pose[new_id].push_back(start_pose);
+        start_poses[new_id].push_back(start);
 
         // Compute representation in Discretised State Representation
         auto start_pbi = planner.findNearestPoseByIndex(start);
@@ -232,14 +241,16 @@ int main(int argc, char *argv[])
         if(send_off_map_edge){
             auto target_off_map = Config::getInstance().get<std::vector<double>>({"test_target_locations_drive_off"});
             target_pbi = {target_off_map[0], target_off_map[1], target_off_map[2], 2};
-            target_positions.push_back(target_pbi);
+            target_positions[new_id] = target_pbi;
+
         }else if(use_example_targets){
             int32_t target_index = std::min(distr(gen), static_cast<int>(test_target_locations.size() - 1));
             auto chosen_target = test_target_locations.at(target_index);
             test_target_locations.erase(test_target_locations.begin() + target_index);
             target_pbi = {chosen_target[0], chosen_target[1], chosen_target[2], 2};
             cpm::Logging::Instance().write(loglevel,"[G2F]Vehicle %u was assigned target position %ld:%ld and heading %ld", new_id, target_pbi.x,target_pbi.y,target_pbi.a);
-            target_positions.push_back(target_pbi);
+            target_positions[new_id] = target_pbi;
+
         }
 
         appendPosesToFile(start_pbi, target_pbi, "../pose_data.json");
@@ -248,11 +259,14 @@ int main(int argc, char *argv[])
 
     //Execute the single shot planning
     cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
-    result = planner.cbs(start_positions, target_positions, false, send_off_map_edge);
-    if(!result.feasible){
-        result = planner.cbs(start_positions, target_positions, true, send_off_map_edge); 
-        cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Constraint relaxation...");
+    std::vector<dynamics::data::PoseByIndex> start;
+    std::vector<dynamics::data::PoseByIndex> target;
+    for(auto start_pose: start_positions){
+        auto id = start_pose.first;
+        start.push_back(start_positions[id]);
+        target.push_back(target_positions[id]);
     }
+    result = planner.cbs(start_positions, target_positions, false, send_off_map_edge);
 
     if(!result.feasible){
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
@@ -269,8 +283,6 @@ int main(int argc, char *argv[])
             reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
         }
     }    
-    
-
 
     // Some internal state flags and internal state keeping
     bool initialized = false;
@@ -301,12 +313,6 @@ int main(int argc, char *argv[])
             cpm::Logging::Instance().write(loglevel,"[G2F] Initialised  at %ull, starting to send trajectories... ", t_now_ms);
             return;
         }
-
-        // If CBS Plan is infeasible, then there is nothing to do
-        if(!result.feasible){
-            return;
-        }
-        
     
         uint32_t index = 0;
         bool all_plans_finished = true;
@@ -362,7 +368,7 @@ int main(int argc, char *argv[])
                 
                 // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
                 std::vector<TrajectoryPoint> trajectory_points;
-                for(uint32_t i = 0; i < plan_for_vehicle.size(); i += 6){ 
+                for(uint32_t i = 5; i < plan_for_vehicle.size() - 5; i += 6){ 
 
                         auto pose = plan_for_vehicle.at(i);
 
@@ -376,6 +382,15 @@ int main(int argc, char *argv[])
                         trajectory_point.t().nanoseconds((pose_time + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
                         trajectory_points.push_back(trajectory_point);
                 }
+
+                // Add precise final target
+                TrajectoryPoint trajectory_point;
+                trajectory_point.px(target_poses[new_id].pos[0] / 100.f);
+                trajectory_point.py(target_poses[new_id].pos[1] / 100.f);
+                trajectory_point.vx((target_poses[new_id].vel / 100.f) * cos(pose.h));
+                trajectory_point.vy((target_poses[new_id].vel / 100.f) * sin(pose.h));
+                trajectory_point.t().nanoseconds((plan_for_vehicle.back().time_ms + 500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                trajectory_points.push_back(trajectory_point);
 
                 // Send the trajecory using the inbuild functions
                 VehicleCommandTrajectory vehicle_command_trajectory;
