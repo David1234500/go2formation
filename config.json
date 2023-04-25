@@ -1,0 +1,90 @@
+{
+    "mp_state_graph":"../mp_state_graph.json",
+    "map": {
+        "angle_steps": 12,
+        "speed_steps": 3,
+        "x_cm": 450,
+        "y_cm": 400
+    },
+    "timestep_ms": 500.0,
+    "disc": {
+        "dstep": 5.0,
+        "hstep": 0.5236
+    },
+    "allowed_reversing":3,
+    "collision_detect":{
+        "mode":"circle",
+        "ov_appr_threshold": 100.0,
+        "ov_appr_step": 15,
+        "cl_appr_threshold": 20.0,
+        "debug_mode":false
+    },
+    "border_detect":{
+        "approx_count":4,
+        "mp_sample_count":4
+    },
+    "velocity":{
+        "acc_limit":60.0,
+        "zero_velocity_level": 1,
+        "driving_velocity_level": 2,
+        "vlevels": [-0.3, 0.0, 0.3]
+    },
+    "MPComputeBruteForce": {
+        "fit_quality_angle": 0.20,
+        "fit_quality_position": 1.0,
+        "fit_allowed_speed_difference": 0.15
+    },
+    "compute": {
+        "worker_count": 30
+    },
+    "mpnl_weights": {
+        "mu_pd": 1.0,
+        "mu_hd": 10.0,
+        "mu_vd": 0.5,
+        "mu_vccd": 0.01,
+        "mu_sccd": 1.0
+    },
+    "mpnl_multi_start_staged":{
+        "uni_sample_count":2,
+        "rand_sample_count":0
+    },
+    "mpnl_args":{
+      "ts_ms": 500.0,
+      "ubf": [ 0.20,  0.20,   60.0,  60.0],
+      "lbf": [-0.20, -0.20,  -60.0, -60.0],
+      "ubr": [ 0.05,  0.05,   60.0,  60.0],
+      "lbr": [-0.05, -0.05,  -60.0, -60.0],
+      "maxt": 1.0,
+      "st_val": 5.0,
+      "a_v": 2.0,
+      "a_p": 1.0,
+      "a_scc": 0.4,
+      "a_h": 0.10
+    },
+    "mpnl_debug":false,
+
+    "mpnl_param_weights": {
+        "mu_l": 1.0,
+        "mu_lth": 1.0,
+        "mu_vd": 1.0,
+        "mu_hth": 10.0
+    },
+    "mpnl_param_args": {
+        "ts_ms": 500.0,
+        "obj_lam_target": 40.0,
+        "ub": [60.0, 5.0,  0.30, 0.30, 65.0],
+        "lb": [0.0,  0.0, -0.30,-0.30, 0.0],
+        "maxt": 20.0,
+        "st_val": 2.0,
+        "uni_sample_count":0,
+        "rand_sample_count":200
+    },
+    "test_target_locations3":[[45,75,6],[3,40,8],[47,4,0],[86,39,3]],
+    "test_target_locations2":[[42,54,8],[65,43,6],[48,24,11],[28,37,0]],
+    "test_target_locations":[[12,73,0],[77,6,7],[13,8,5],[78,72,10]],
+
+    "test_yeet":false,
+    "test_target_locations_drive_off":[44,57,2],
+
+    "hlc_main_log_level":1
+}
