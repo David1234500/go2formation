@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
     const std::string vehicle_poses_json = cpm::cmd_parameter_string("poses", "", argc, argv);
 
     ////////////// Initialization for trajectory planning /////////////////////////////////
-    const uint64_t dt_nanos = 400000000ull;
+    const uint64_t dt_nanos = 300000000ull;
     HLCCommunicator hlc_communicator(vehicle_ids);
     cpm::Writer<VehicleCommandTrajectoryPubSubType> writer_vehicleCommandTrajectory(
             hlc_communicator.getLocalParticipant()->get_participant(), 
@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
 
 
             // If the plan has ended, note down for each 
-            
+            cpm::Logging::Instance().write(loglevel,"[G2F] Expc remaining runtime: %lld", (long long) (t_now_ms - (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms)));
             if(!wrote_trajectory_data_to_disc && (t_now_ms > (completion_time_ms + t_ref_start_ms + t_delay_to_start_ms))){
                 write_pose_with_time_information(std::to_string(t_now_ms) + "_traj.json", actual_pose, reference_pose, t_ref_start_ms + t_delay_to_start_ms);
                 wrote_trajectory_data_to_disc = true;
