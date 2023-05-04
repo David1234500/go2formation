@@ -3,9 +3,7 @@ set(CMAKE_BUILD_TYPE debug)
 add_definitions(-Wall -Wextra -Werror=return-type)
 set (CMAKE_CXX_STANDARD 17)
 
-# include_directories(SimpleHLC/thirdparty/eigen)
-# include_directories(SimpleHLC/include)
-# add_subdirectory(SimpleHLC)
+include_directories(include)
 
 include_directories(NH-ICBS-HLC/thirdparty/json/include)
 
@@ -41,6 +39,24 @@ link_libraries(dl nsl m pthread rt)
 add_executable(main
     src/main.cpp
 )
+
+add_executable(main_hlc
+    src/main_hlc.cpp
+)
+
+file(GLOB EXEC_SRC "experiments/*.cpp")
+foreach(src_ ${EXEC_SRC})
+	get_filename_component(target ${src_} NAME)
+    
+	string(REPLACE ".cpp" "" target ${target})
+	string(REPLACE "/" "_" target ${target})
+    message(STATUS "Found executable : ${target}")
+
+	add_executable(${target} ${src_})
+    target_link_libraries(${target} planner_lib cpm fastrtps fastcdr foonathan_memory)
+endforeach()
+
 target_link_libraries(main planner_lib cpm fastrtps fastcdr foonathan_memory)
+target_link_libraries(main_hlc planner_lib cpm fastrtps fastcdr foonathan_memory)
 
 

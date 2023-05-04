@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
 
         // Compute available vehicle start positions (just for logging)
         dynamics::data::Pose2D start;
-        start.pos = {new_pose.x() * 100,new_pose.y() * 100};
+        start.pos = {new_pose.x() * 100.f,new_pose.y() * 100.f};
         start.h = new_pose.yaw();
         start.vel = 0;
 
@@ -267,12 +267,20 @@ int main(int argc, char *argv[])
     cpm::Logging::Instance().write(loglevel,"[G2F] CBS starting planning process...");
     std::vector<dynamics::data::PoseByIndex> start;
     std::vector<dynamics::data::PoseByIndex> target;
+    std::map<uint32_t,uint32_t> results_map;
+    uint32_t index2 = 0;
     for(auto start_pose: start_positions){
         auto id = start_pose.first;
         start.push_back(start_positions[id]);
         target.push_back(target_positions[id]);
+        results_map[index2] = id;
+        index2 += 1;
     }
     result = planner.cbs(start, target, false, send_off_map_edge);
+
+    if(!result.feasible){
+        result = planner.cbs(start, target, true, send_off_map_edge);
+    }
 
     if(!result.feasible){
         cpm::Logging::Instance().write(loglevel,"[G2F] CBS Infeasible! Terminating!");
@@ -282,12 +290,17 @@ int main(int argc, char *argv[])
     cpm::Logging::Instance().write(loglevel,"[G2F] CBS finished planning, now executing plan");
 
     // Log predicted path to file for later comparison
-    for(auto vehicle_path: result.result){
+
+    std::map<int32_t, std::vector<dynamics::data::Pose2WithTime>> corrected_result;
+    for(auto& vehicle_path: result.result){
         int64_t last_pose_time_ms = static_cast<int64_t>(vehicle_path.second.interprimitive.at(vehicle_path.second.interprimitive.size() - 1).time_ms);
         completion_time_ms = (last_pose_time_ms > completion_time_ms ? last_pose_time_ms : completion_time_ms);
+
         for(auto ref_pose_with_time: vehicle_path.second.interprimitive ){
             reference_pose[vehicle_path.first].push_back(ref_pose_with_time);
         }
+
+    
     }    
 
     // Some internal state flags and internal state keeping
@@ -372,48 +385,47 @@ int main(int argc, char *argv[])
                     return;
                 }
                 
-                // std::vector<TrajectoryPoint> trajectory_points;
-                // TrajectoryPoint trajectory_point;
-                // trajectory_point.px(start_poses[new_id].pos[0] / 100.f);
-                // trajectory_point.py(start_poses[new_id].pos[1] / 100.f);
-                // trajectory_point.vx(0);
-                // trajectory_point.vy(0);
-                // trajectory_point.t().nanoseconds((plan_for_vehicle.back().time_ms + 500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
-                // trajectory_points.push_back(trajectory_point);
+                std::vector<TrajectoryPoint> trajectory_points;
+                TrajectoryPoint trajectory_point;
+                trajectory_point.px(start_poses[new_id].pos[0] / 100.f);
+                trajectory_point.py(start_poses[new_id].pos[1] / 100.f);
+                trajectory_point.vx((plan_for_vehicle.front().vel / 100.f) * cos(plan_for_vehicle.front().h));
+                trajectory_point.vy((plan_for_vehicle.front().vel / 100.f) * sin(plan_for_vehicle.front().h));
+                trajectory_point.t().nanoseconds((t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                trajectory_points.push_back(trajectory_point);
 
                 // Send the vehicles their complete plans (testing -> dont send half, all is better with sparser points)
-                std::vector<TrajectoryPoint> trajectory_points;
-                for(uint32_t i = 0; i < plan_for_vehicle.size() ; i += 5){ 
+                // std::vector<TrajectoryPoint> trajectory_points;
+                uint32_t step_size = 7;
+                for(uint32_t i = 0; i < plan_for_vehicle.size(); i += step_size){ 
 
                         auto pose = plan_for_vehicle.at(i);
 
                         // Transform back from internal coordinate system to Lab system
                         TrajectoryPoint trajectory_point;
+                        
                         trajectory_point.px(pose.pos[0] / 100.f);
                         trajectory_point.py(pose.pos[1] / 100.f);
-                        if(pose.vel >= 0){
-                            trajectory_point.vx((pose.vel / 100.f) * cos(pose.h));
-                            trajectory_point.vy((pose.vel / 100.f) * sin(pose.h));
-                            
-                        }else{
-                            trajectory_point.vx((std::abs(pose.vel) / 100.f) * cos(pose.h + PI));
-                            trajectory_point.vy((std::abs(pose.vel) / 100.f) * sin(pose.h + PI));
-                            
-                        }
                         
+                        trajectory_point.vx((pose.vel / 100.f) * cos(pose.h));
+                        trajectory_point.vy((pose.vel / 100.f) * sin(pose.h));
+
                         int64_t pose_time = static_cast<int64_t>(pose.time_ms);
                         trajectory_point.t().nanoseconds((pose_time + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
                         trajectory_points.push_back(trajectory_point);
                 }
 
                 // Add precise final target
-                // TrajectoryPoint trajectory_point;
-                // trajectory_point.px(target_poses[new_id].pos[0] / 100.f);
-                // trajectory_point.py(target_poses[new_id].pos[1] / 100.f);
-                // trajectory_point.vx(0);
-                // trajectory_point.vy(0);
-                // trajectory_point.t().nanoseconds((plan_for_vehicle.back().time_ms + 500 + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
-                // trajectory_points.push_back(trajectory_point);
+                TrajectoryPoint trajectory_point2;
+                trajectory_point2.px(target_poses[new_id].pos[0] / 100.f);
+                trajectory_point2.py(target_poses[new_id].pos[1] / 100.f);
+                cpm::Logging::Instance().write(loglevel,"[G2F] Adding target pose %lf:%lf", target_poses[new_id].pos[0] / 100.f, target_poses[new_id].pos[1] / 100.f);
+                trajectory_point.vx((plan_for_vehicle.back().vel / 100.f) * cos(plan_for_vehicle.back().h));
+                trajectory_point.vy((plan_for_vehicle.back().vel / 100.f) * sin(plan_for_vehicle.back().h));
+                // cpm::Logging::Instance().write(loglevel,"[G2F] Adding target pose %lf:%lf", (plan_for_vehicle.back().vel / 100.f) * cos(plan_for_vehicle.back().h), (plan_for_vehicle.back().vel / 100.f) * sin(plan_for_vehicle.back().h));
+                trajectory_point2.t().nanoseconds((static_cast<int64_t>(plan_for_vehicle.back().time_ms)  + t_ref_start_ms + t_delay_to_start_ms) * 1000000);
+                trajectory_points.push_back(trajectory_point2);
+
 
                 // Send the trajecory using the inbuild functions
                 VehicleCommandTrajectory vehicle_command_trajectory;
